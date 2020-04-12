@@ -305,7 +305,7 @@ fun contains (list, x) {
 fun compile (env, code) {
 
   fun compileBinop (op, src, dest) { -- dest <op> src
-    if {"+", "-", "*"}.contains(op) then
+    if {"+", "-"}.contains(op) then
       {binop (op, src, dest)}
     elif {"&&", "!!"}.contains(op) then
       {binop ("cmp", L (0), src), set ("!=", src), 
@@ -315,8 +315,9 @@ fun compile (env, code) {
       {binop ("cmp", src, dest), set (op, dest)}
     else
       case op of
-        "/" -> {move(dest, eax), Cltd, IDiv (src), move (eax, dest)}
-      | "%" -> {move(dest, eax), Cltd, IDiv (src), move (edx, dest)}
+        "*" -> {move (dest, eax), Binop ("*", src, eax), move (eax, dest)}
+      | "/" -> {move (dest, eax), Cltd, IDiv (src),      move (eax, dest)}
+      | "%" -> {move (dest, eax), Cltd, IDiv (src),      move (edx, dest)}
       esac
     fi
   }
