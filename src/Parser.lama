@@ -138,56 +138,73 @@ local primary  = memo $ eta syntax (
           }
         }
         -- write
-      | loc=pos -kWrite x=inbr[s("("), exp, s(")")] {
+      | loc=pos -kWrite e=inbr[s("("), exp, s(")")] {
           fun (a) {
-            assertVoid(a, Write (x(Val)), loc)
+            assertVoid(a, Write (e(Val)), loc)
           }
         }
         -- while
-      | loc=pos -kWhile e=basic s=inbr[kDo, exp, kOd] {
+      | loc=pos -kWhile e=exp s=inbr[kDo, scopeExpr, kOd] {
           fun (a) {
             assertVoid(a, While (e(Val), s(Void)), loc)
           }
         }
         -- if
-      | loc=pos -kIf e=basic -kThen s1=exp sn=elsePart? -kFi {
+      | loc=pos -kIf e=basic -kThen s1=exp s2=elsePart -kFi {
           fun (a) {
-            case sn of
-              Some (s2) -> If (e(Val), s1(a), s2(a))
-            | _         -> assertVoid(a, If (e(Val), s1(a), Skip), loc)
-            esac
+            If (e(Val), s1(a), s2(a))
           }
         }
         -- repeat
-      | loc=pos -kRepeat s=exp -kUntil e=basic {
+      | loc=pos -kRepeat s=scopeExpr -kUntil e=basic {
           fun (a) {
-            assertVoid(a, Repeat (s(Void), e(Val)), loc)
+            assertVoid(a, distributeScope(s(Void), fun (s) { Repeat (s, e(Val)) }), loc)
           }
         }
         -- for
-      | loc=pos -kFor init=basic -s[","] cond=basic -s[","] step=basic s=inbr[kDo, exp, kOd] {
+      | loc=pos -kFor init=scopeExpr -s[","] cond=exp -s[","] step=exp s=inbr[kDo, scopeExpr, kOd] {
           fun (a) {
-            assertVoid(a, Seq (init(Void), While (cond(Val), Seq (s(Void), step(Void)))), loc)
+            assertVoid(a, distributeScope(init(Void), fun (init) { Seq (init, While (cond(Val), Seq (s(Void), step(Void)))) }), loc)
           }
         }
       | inbr[s("("), exp, s(")")]
+      | inbr[s("{"), scopeExpr, s("}")]
       ),
+      ifPart = memo $ eta syntax (cond=exp -kThen th=scopeExpr el=elsePart {
+          fun (a) {
+            If (cond(Val), th(a), el(a))
+          }
+        }),
       elsePart = memo $ eta syntax (
-        loc=pos -kElif e=exp -kThen s1=exp sn=elsePart? {
+        loc=pos { fun (a) { assertVoid(a, Skip, loc) } }
+      | -kElif ifPart
+      | -kElse scopeExpr
+      ),
+      scopeExpr  = memo $ eta syntax (
+        defs=definition* e=exp? {
           fun (a) {
-            case sn of 
-              Some (s2) -> If (e(Val), s1(a), s2(a))
-            | _         -> assertVoid(a, If (e(Val), s1(a), Skip), loc)
-            esac 
-          }
-        }
-      | -kElse s2=exp {
-          fun (a) {
-            s2(a)
+            fun (e) {
+              case defs of
+                {} -> e
+              | _  -> expandScope(defs, e)
+              esac
+            } (
+              case e of
+                Some (e) -> e(a)
+              | _        -> Skip
+              esac
+            )
           }
         }
       ),
-      scopeExpr  = memo $ eta syntax ($(failure ("scope expression parsing is not implemented"))),
+      definition = memo $ eta syntax (
+        -kLocal defs=listBy[syntax (lident (s["="] e=basic { e(Val) })?), s(",")] s[";"] {
+          Local (defs)
+        }
+      | -kFun name=lident args=inbr[s("("), list0By(lident, s(",")), s(")")] body=inbr[s("{"), scopeExpr, s("}")] {
+          Fun (name, args, body(Weak))
+        }
+      ),
       basic    = memo $ eta (expr ({[Right, singleton ([s (":="),
                                                         fun (l, loc, r) {
                                                           fun (a) {assertValue (a, Assn (l (Ref), r (Val)), loc)}
